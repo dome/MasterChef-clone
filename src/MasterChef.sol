@@ -3,7 +3,7 @@ pragma solidity 0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SushiToken} from "./SushiToken.sol";
+import {RewardToken} from "./RewardToken.sol";
 
 contract MasterChef is Ownable {
     struct UserInfo {
@@ -18,7 +18,7 @@ contract MasterChef is Ownable {
         uint256 accSushiPerShare; // Accumulated SUSHIs per share. 1e12.
     }
 
-    SushiToken public sushi; // SUSHI token.
+    RewardToken public sushi; // SUSHI token.
     address public devaddr; // Dev addr.
     uint256 public bonusEndBlock; // Block number when bonus SUSHI period ends.
     uint256 public sushiPerBlock; // SUSHI tokens created per block.
@@ -33,10 +33,11 @@ contract MasterChef is Ownable {
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
+    event Claim(address indexed user, uint256 indexed pid, uint256 amount);
     event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
 
     constructor(
-        SushiToken _sushi,
+        RewardToken _sushi,
         address _devaddr,
         uint256 _sushiPerBlock,
         uint256 _startBlock,
@@ -53,9 +54,15 @@ contract MasterChef is Ownable {
         return poolInfo.length;
     }
 
+    function setsushiPerBlock(uint256 _sushiPerBlock) public onlyOwner {
+        require(_sushiPerBlock > 0, "setsushiPerBlock: _sushiPerBlock <= 0");
+        sushiPerBlock = _sushiPerBlock;
+    }
     // can be called only by owner. Do not add the same lp token more than once. Rewards will be messed.
+
     function add(uint256 _allocPoint, IERC20 _lpToken, bool _withUpdate) public onlyOwner {
         if (_withUpdate) {
+            massUpdatePool();
             // mass update functions ...
         }
         uint256 lastRewardBlock = block.number > startBlock ? block.number : startBlock;
@@ -68,6 +75,7 @@ contract MasterChef is Ownable {
     // Update the given pool's SUSHI allocation point. Can only be called by the owner.
     function set(uint256 _pid, uint256 _allocPoint, bool _withUpdate) public onlyOwner {
         if (_withUpdate) {
+            massUpdatePool();
             // mass update functions ...
         }
         totalAllocPoint = totalAllocPoint - poolInfo[_pid].allocPoint + _allocPoint;
@@ -158,6 +166,18 @@ contract MasterChef is Ownable {
         user.rewardDebt = user.amount * pool.accSushiPerShare / 1e12;
         pool.lpToken.transfer(msg.sender, _amount);
         emit Withdraw(msg.sender, _pid, _amount);
+    }
+
+    // View function to see pending SUSHIs on frontend;
+    function claim(uint256 _pid) public {
+        PoolInfo storage pool = poolInfo[_pid];
+        UserInfo storage user = userInfo[_pid][msg.sender];
+
+        updatePool(_pid);
+
+        uint256 pending = user.amount * pool.accSushiPerShare / 1e12 - user.rewardDebt;
+        safeSushiTransfer(msg.sender, pending);
+        emit Claim(msg.sender, _pid, pending);
     }
 
     function emergencyWithdraw(uint256 _pid) public {
